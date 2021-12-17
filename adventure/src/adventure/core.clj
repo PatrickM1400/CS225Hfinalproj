@@ -1,5 +1,8 @@
 (ns adventure.core
-  (:gen-class))
+  (:gen-class)
+  (:require clojure.set))
+
+
 
 (def maze {
   1 [1 2 6] 2 [1 2 3 7] 3 [2 3 4 8] 4 [3 4 5 9] 5 [4 5 10]
@@ -9,13 +12,22 @@
   21 [16 21 22] 22 [17 21 22 23] 23 [18 22 23 24] 24 [19 23 24 25] 25 [20 24 25]
   })
 
-(def maze-size (count maze))
+(def key-names ["blue" "green" "red"])
 
 (defn room-unique
   "Pick a random room from 1 to 25 that is not in the set `exclude`.  Does not check for errors."
   [exclude]
   (let [pick (+ (rand-int 25) 1)]
       (if (exclude pick) (room-unique exclude) pick)))
+
+(defn cur-player [state] (state :turn))
+(defn notcur-player [state] (- 1 (state :turn)))
+
+(defn change-turn [state] (assoc state :turn (notcur-player state)))
+
+(defn get-indices [myvec needle]
+  (set (map first (filter (fn [pair] (= (second pair) needle)) (map-indexed vector myvec))))
+)
 
 (defn new-game []
   (let [
@@ -26,295 +38,237 @@
     hammer2loc (room-unique #{1 21 25 blueloc greenloc redloc hammer1loc})
     ]
     {
-    :player1 1
-    :player2 25
-    :blueloc blueloc
-    :bluekey :vased
-    :greenloc greenloc
-    :greenkey :vased
-    :redloc redloc
-    :redkey :vased
-    :hammer1loc hammer1loc
-    :hammer1 :hidden
-    :hammer2loc hammer2loc
-    :hammer2 :hidden
-    :status1 :trapped
-    :status2 :trapped
-    :turn 1}))
+    :playerlocs [1 25] ; player 0, called "1" starts at room 1, player 2 starts at room 25
+    :playerescaped [false false]
+    :keylocs [blueloc greenloc redloc]
+    :keystatus [:vased :vased :vased]
+    :hammerlocs [hammer1loc hammer2loc]
+    :hammerstatus [:hidden :hidden]
+    :turn 0}
+  )
+)
 
-(defn move-player1 [state]
-  (let [pick (rand-nth (-> :player1 state maze))] (if (== pick (state :player1)) (move-player1 state) pick))
-  )
-(defn move-player2 [state]
-  (let [pick (rand-nth (-> :player2 state maze))] (if (== pick (state :player2)) (move-player2 state) pick))
-  )
+(defn vector-has [v elt]
+      (some #{elt} v))
+
+(defn bump-player [playerno state]
+  (let [curloc ((state :playerlocs) playerno)]
+  (let [pick (rand-nth (get maze curloc))] (if (== pick curloc) (bump-player playerno state) pick))
+))
 
 (defn valid-room [curroom moveto] ;return the room to move into, return -1 if can't move into room
-  (cond
-    (= moveto "n") (let [newroom (- curroom 5)] (if (and (<= curroom 5) (>= curroom 1)) -1 newroom))
-    (= moveto "s") (let [newroom (+ curroom 5)] (if (and (<= curroom 25) (>= curroom 21)) -1 newroom))
-    (= moveto "e") (let [newroom (+ curroom 1)] (if (= (mod curroom 5) 0) -1 newroom))
-    (= moveto "w") (let [newroom (- curroom 1)] (if (= (mod curroom 5) 1) -1 newroom))
-    (= moveto "d") curroom
-    :else -1
-    )
+  (do
+  (println curroom)
+  (case moveto
+    "n" (let [newroom (- curroom 5)] (if (and (<= curroom 5) (>= curroom 1)) -1 newroom))
+    "s" (let [newroom (+ curroom 5)] (if (and (<= curroom 25) (>= curroom 21)) -1 newroom))
+    "e" (let [newroom (+ curroom 1)] (if (= (mod curroom 5) 0) -1 newroom))
+    "w" (let [newroom (- curroom 1)] (if (= (mod curroom 5) 1) -1 newroom))
+    "d" curroom
+    -1
+  )
+  )
 )
 
 (defn collide [state]
-  (if (= (state :player1) (state :player2))
-    (do (println "Oh, fancy seeing you here")
-    (if (= (state :turn) 1)
-      (cond 
-        (= (state :bluekey) :play2) (assoc state :player2 (move-player2 state) :turn 1 :bluekey :hidden :blueloc (room-unique #{21 (state :redloc) (state :greenloc)}))
-        (= (state :greenkey) :play2) (assoc state :player2 (move-player2 state) :turn 1 :greenkey :hidden :greenloc (room-unique #{21 (state :redloc) (state :blueloc)}))
-        (= (state :redkey) :play2) (assoc state :player2 (move-player2 state) :turn 1 :redkey :hidden :redloc (room-unique #{21 (state :blueloc) (state :greenloc)}))
-        :else (assoc state :player2 (move-player2 state) :turn 1)
+  (if (apply = (state :playerlocs)) ; both positions equal
+    (do 
+      (println "Oh, fancy seeing you here")
+      ; now, we rehide the other person's first key
+      (let [other-player (notcur-player state) first-key (.indexOf (state :keystatus) other-player)]
+        (let [bumped-state (assoc-in state [:playerlocs other-player] (bump-player other-player state))]
+          (if (not= first-key -1) ; if they have any keys
+            (assoc-in (assoc-in bumped-state [:keylocs first-key] (room-unique (conj (set (state :keylocs)) 21))) [:keystatus first-key] :hidden) ; move and hide first key (not to finish room though)
+            bumped-state ; else just bump other player
+          )
+        )
       )
-      (cond 
-        (= (state :bluekey) :play1) (assoc state :player1 (move-player1 state) :turn 2 :bluekey :hidden :blueloc (room-unique #{21 (state :redloc) (state :greenloc)}))
-        (= (state :greenkey) :play1) (assoc state :player1 (move-player1 state) :turn 2 :greenkey :hidden :greenloc (room-unique #{21 (state :redloc) (state :blueloc)}))
-        (= (state :redkey) :play1) (assoc state :player1 (move-player1 state) :turn 2 :redkey :hidden :redloc (room-unique #{21 (state :blueloc) (state :greenloc)}))
-        :else (assoc state :player1 (move-player1 state) :turn 2)
-      ))
     )
-    state)
+    state
+  )
 )
 
 (defn examine-room [state]
-  (if (= (state :turn) 1)
-    (cond 
-      (and (= (state :player1) (state :blueloc)) (= (state :bluekey) :vased)) (println "You find a blue vase, you'll need a hammer to get the key inside")
-      (and (= (state :player1) (state :redloc)) (= (state :redkey) :vased)) (println "You find a red vase, you'll need a hammer to get the key inside")
-      (and (= (state :player1) (state :greenloc)) (= (state :greenkey) :vased)) (println "You find a green vase, you'll need a hammer to get the key inside")
-      (and (= (state :player1) (state :blueloc)) (= (state :bluekey) :hidden)) (println "You find a blue key on the ground")
-      (and (= (state :player1) (state :redloc)) (= (state :redkey) :hidden)) (println "You find a red key on the ground")
-      (and (= (state :player1) (state :greenloc)) (= (state :greenkey) :hidden)) (println "You find a green key on the ground")
-      (and (= (state :player1) (state :hammer1loc)) (= (state :hammer1) :hidden)) (println "You find a hammer on the ground")
-      (and (= (state :player1) (state :hammer2loc)) (= (state :hammer2) :hidden)) (println "You find a hammer on the ground")
-      :else (println "You find nothing in this room")
+  (let [curloc ((state :playerlocs) (state :turn)) first-key (.indexOf (state :keylocs) curloc) first-hammer (.indexOf (state :hammerlocs) curloc) has-hammer (not= (.indexOf (state :hammerstatus) (cur-player state)) -1)]
+    (cond
+      (and (not= first-hammer -1) (= ((state :hammerstatus) first-hammer) :hidden)) (println "You find a hammer on the ground")
+      (not= first-key -1) (case ((state :keystatus) first-key)
+        :vased (if has-hammer
+          (println "You find a" (key-names first-key) "vase with a key inside, you can break it with your hammer!")
+          (println "You find a" (key-names first-key) "vase, you'll need a hammer to get the key inside...")
+        )
+        :hidden (println "You find a" (key-names first-key) "key on the ground")
+        (println "You find nothing in this room.")
       )
-    (cond 
-      (and (= (state :player2) (state :blueloc)) (= (state :bluekey) :vased)) (println "You find a blue vase, you'll need a hammer to get the key inside")
-      (and (= (state :player2) (state :redloc)) (= (state :redkey) :vased)) (println "You find a red vase, you'll need a hammer to get the key inside")
-      (and (= (state :player2) (state :greenloc)) (= (state :greenkey) :vased)) (println "You find a green vase, you'll need a hammer to get the key inside")
-      (and (= (state :player2) (state :blueloc)) (= (state :bluekey) :hidden)) (println "You find a blue key on the ground")
-      (and (= (state :player2) (state :redloc)) (= (state :redkey) :hidden)) (println "You find a red key on the ground")
-      (and (= (state :player2) (state :greenloc)) (= (state :greenkey) :hidden)) (println "You find a green key on the ground")
-      (and (= (state :player2) (state :hammer1loc)) (= (state :hammer1) :hidden)) (println "You find a hammer on the ground")
-      (and (= (state :player2) (state :hammer2loc)) (= (state :hammer2) :hidden)) (println "You find a hammer on the ground")
-      :else (println "You find nothing in this room")
-      )
+      :else (println "You find nothing in this room!")
+    )
   )
 )
 
 (defn open-inv [state]
-  (println "Here is your inventory")
-  (if (= (state :turn) 1)
-    (do
-      (if (= (state :bluekey) :play1) (print "Blue key, ") (print ""))
-      (if (= (state :redkey) :play1) (print "Red key, ") (print ""))
-      (if (= (state :greenkey) :play1) (print "Green key, ") (print ""))
-      (if (or (= (state :hammer1) :player1) (= (state :hammer2) :player1)) (println "Hammer") (println ""))
-    )
-    (do
-      (if (= (state :bluekey) :play2) (print "Blue key, ") (print ""))
-      (if (= (state :redkey) :play2) (print "Red key, ") (print ""))
-      (if (= (state :greenkey) :play2) (print "Green key, ") (print ""))
-      (if (or (= (state :hammer1) :player2) (= (state :hammer2) :player2)) (println "Hammer") (println ""))
+  (do
+    (println "Here is your inventory:")
+    (doall (map (fn [keynum] (println (key-names keynum) "key")) (get-indices (state :keystatus) (cur-player state))))
+    (if (vector-has (state :hammerstatus) (cur-player state))
+      (println "Hammer")
     )
   )
 )
 
 (defn drop-obj [state]
-    (do (println "Which object would you like to drop?")
-    (if (= (state :turn) 1)
-      (do 
-        (if (= (state :bluekey) :play1) (print "Blue key (blue) ") (print ""))
-        (if (= (state :redkey) :play1) (print "Red key (red) ") (print ""))
-        (if (= (state :greenkey) :play1) (print "Green key (green) ") (print ""))
-        (if (or (= (state :hammer1) :player1) (= (state :hammer2) :player1)) (println "Hammer (hammer) ") (println ""))
-        (let [item (read-line)]
-          (cond
-            (= item "blue") (if (= (state :bluekey) :play1) 
-              (do (println "Dropping the blue key")(assoc state :bluekey :hidden :blueloc (state :player1))) 
-              (do (println "Invalid input")(conj state)))
-            (= item "red") (if (= (state :redkey) :play1) 
-                (do (println "Dropping the red key")(assoc state :redkey :hidden :redloc (state :player1))) 
-                (do (println "Invalid input")(conj state)))
-            (= item "green") (if (= (state :greenkey) :play1) 
-                (do (println "Dropping the green key")(assoc state :greenkey :hidden :greenloc (state :player1))) 
-                (do (println "Invalid input")(conj state)))
-            (= item "hammer") (cond
-              (= (state :hammer1) :player1) (do (println "Dropping the hammer") (assoc state :hammer1 :hidden :hammer1loc (state :player1)))
-              (= (state :hammer2) :player1) (do (println "Dropping the hammer") (assoc state :hammer2 :hidden :hammer2loc (state :player1)))
-              :else (do (print "Invalid input")(conj state))
-              )
-            :else (do (println "Invalid input")(conj state))
-          )))
-      (do 
-        (if (= (state :bluekey) :play2) (print "Blue key (blue) ") (print ""))
-        (if (= (state :redkey) :play2) (print "Red key (red) ") (print ""))
-        (if (= (state :greenkey) :play2) (print "Green key (green) ") (print ""))
-        (if (or (= (state :hammer1) :player2) (= (state :hammer2) :player2)) (println "Hammer (hammer) ") (println ""))
-        (let [item (read-line)]
-          (cond
-            (= item "blue") (if (= (state :bluekey) :play2) 
-              (do (println "Dropping the blue key")(assoc state :bluekey :hidden :blueloc (state :player2))) 
-              (do (println "Invalid input")(conj state)))
-            (= item "red") (if (= (state :redkey) :play2) 
-                (do (println "Dropping the red key")(assoc state :redkey :hidden :redloc (state :player2))) 
-                (do (println "Invalid input")(conj state)))
-            (= item "green") (if (= (state :greenkey) :play2) 
-                (do (println "Dropping the green key")(assoc state :greenkey :hidden :greenloc (state :player2))) 
-                (do (println "Invalid input")(conj state)))
-            (= item "hammer") (cond
-              (= (state :hammer1) :player2) (do (println "Dropping the hammer") (assoc state :hammer1 :hidden :hammer1loc (state :player2)))
-              (= (state :hammer2) :player2) (do (println "Dropping the hammer") (assoc state :hammer2 :hidden :hammer2loc (state :player2)))
-              :else (do (print "Invalid input")(conj state))
-              )
-            :else (do (println "Invalid input")(conj state))
-          )))
+  (do 
+    (println "Which object would you like to drop?")
+    (doall (map (fn [keynum] (println (str (key-names keynum) " key (" (key-names keynum) ")"))) (get-indices (state :keystatus) (cur-player state))))
+    (if (vector-has (state :hammerstatus) (cur-player state))
+      (println "Hammer (hammer)")
+    )
+    (let [item (read-line) keyno (.indexOf key-names item) curloc ((state :playerlocs) (cur-player state))]
+      (cond
+        (not= keyno -1) (if (= ((state :keystatus) keyno) (cur-player state)) ; do we own this key
+          (do
+            (println "Dropped" (key-names keyno) "key")
+            (assoc-in (assoc-in state [:keylocs keyno] curloc) [:keystatus keyno] :hidden)
+          )
+          (do 
+            (println "You don't have that key!")
+            state
+          )
+        )
+        (= item "hammer") (let [first-hammer (.indexOf (state :hammerstatus) (cur-player state))]
+          (if (not= first-hammer -1)
+            (do
+              (println "Dropping hammer")
+              (assoc-in (assoc-in state [:hammerlocs first-hammer] curloc) [:hammerstatus first-hammer] :hidden)
+            )
+            (do
+              (println "You don't have a hammer!")
+              state
+            )
+          )
+        )
+        :else (do
+          (println "Invalid input.")
+          state
+        )
+      )
     )
   )
 )
 
 (defn take-obj [state]
-  (if (= (state :turn) 1) ;player 1
-    (cond
-      (and (= (state :player1) (state :blueloc)) (= (state :bluekey) :vased))
-        (if (or (= (state :hammer1) :player1) (= (state :hammer2) :player1))
-         (do (println "You break the blue vase and obtain the blue key!") (assoc state :bluekey :play1))
-         (do (println "You can't get to the key, you'll need a hammer to break the vase") (conj state)))
-      (and (= (state :player1) (state :redloc)) (= (state :redkey) :vased))
-        (if (or (= (state :hammer1) :player1) (= (state :hammer2) :player1))
-          (do (println "You break the red vase and obtain the red key!") (assoc state :redkey :play1))
-          (do (println "You can't get to the key, you'll need a hammer to break the vase") (conj state)))
-      (and (= (state :player1) (state :greenloc)) (= (state :greenkey) :vased))
-        (if (or (= (state :hammer1) :player1) (= (state :hammer2) :player1))
-          (do (println "You break the green vase and obtain the green key!") (assoc state :greenkey :play1))
-          (do (println "You can't get to the key, you'll need a hammer to break the vase") (conj state)))
-      (and (= (state :player1) (state :blueloc)) (= (state :bluekey) :hidden))
-        (do (println "You pickup the blue key off the ground!") (assoc state :bluekey :play1))
-      (and (= (state :player1) (state :redloc)) (= (state :redkey) :hidden))
-        (do (println "You pickup the red key off the ground!") (assoc state :redkey :play1))
-      (and (= (state :player1) (state :greenloc)) (= (state :greenkey) :hidden))
-        (do (println "You pickup the green key off the ground!") (assoc state :greenkey :play1))
-      (and (= (state :player1) (state :hammer1loc)) (= (state :hammer1) :hidden))
-        (if (= (state :hammer2) :player1)
-          (do (println "You already have a hammer") (conj state))
-          (do (println "You pickup a hammer") (assoc state :hammer1 :player1)))
-      (and (= (state :player1) (state :hammer2loc)) (= (state :hammer2) :hidden))
-        (if (= (state :hammer1) :player1)
-          (do (println "You already have a hammer") (conj state))
-          (do (println "You pickup a hammer") (assoc state :hammer2 :player1)))
-      :else (do (println "There is nothing to take in this room") (conj state))
-    )
-    (cond ;player 2
-      (and (= (state :player2) (state :blueloc)) (= (state :bluekey) :vased))
-        (if (or (= (state :hammer1) :player2) (= (state :hammer2) :player2))
-         (do (println "You break the blue vase and obtain the blue key!") (assoc state :bluekey :play2))
-         (do (println "You can't get to the key, you'll need a hammer to break the vase") (conj state)))
-      (and (= (state :player2) (state :redloc)) (= (state :redkey) :vased))
-        (if (or (= (state :hammer1) :player2) (= (state :hammer2) :player2))
-          (do (println "You break the red vase and obtain the red key!") (assoc state :redkey :play2))
-          (do (println "You can't get to the key, you'll need a hammer to break the vase") (conj state)))
-      (and (= (state :player2) (state :greenloc)) (= (state :greenkey) :vased))
-        (if (or (= (state :hammer1) :player2) (= (state :hammer2) :player2))
-          (do (println "You break the green vase and obtain the green key!") (assoc state :greenkey :play2))
-          (do (println "You can't get to the key, you'll need a hammer to break the vase") (conj state)))
-      (and (= (state :player2) (state :blueloc)) (= (state :bluekey) :hidden))
-        (do (println "You pickup the blue key off the ground!") (assoc state :bluekey :play2))
-      (and (= (state :player2) (state :redloc)) (= (state :redkey) :hidden))
-        (do (println "You pickup the red key off the ground!") (assoc state :redkey :play2))
-      (and (= (state :player2) (state :greenloc)) (= (state :greenkey) :hidden))
-        (do (println "You pickup the green key off the ground!") (assoc state :greenkey :play2))
-      (and (= (state :player2) (state :hammer1loc)) (= (state :hammer1) :hidden))
-        (if (= (state :hammer2) :player2)
-          (do (println "You already have a hammer") (conj state))
-          (do (println "You pickup a hammer") (assoc state :hammer1 :player2)))
-      (and (= (state :player2) (state :hammer2loc)) (= (state :hammer2) :hidden))
-        (if (= (state :hammer1) :player2)
-          (do (println "You already have a hammer") (conj state))
-          (do (println "You pickup a hammer") (assoc state :hammer2 :player2)))
-      :else (do (println "There is nothing to take in this room") (conj state))
+  (let [curplayer (cur-player state) curloc ((state :playerlocs) curplayer) has-hammer (not= (.indexOf (state :hammerstatus) curplayer) -1)]
+    ; Is key hidden in room, and if so which one?
+    (let [
+      keyshere (get-indices (state :keylocs) curloc)
+      keyhid (first (clojure.set/intersection keyshere (get-indices (state :keystatus) :hidden)))
+      keyvase (first (clojure.set/intersection keyshere (get-indices (state :keystatus) :vased)))
+      hammerhere (first (clojure.set/intersection (get-indices (state :hammerlocs) curloc) (get-indices (state :hammerstatus) :hidden)))
+      ]
+      (cond 
+        (not= keyhid nil) (do
+          (println "You pick up the" (key-names keyhid) "key off the ground!")
+          (assoc-in state [:keystatus keyhid] (cur-player state))
+        )
+        (and (not= keyvase nil) has-hammer) (do
+          (println "You break the" (key-names keyvase) "vase and obtain the" (key-names keyvase) "key!")
+          (assoc-in state [:keystatus keyvase] (cur-player state))
+        )
+        (and (not= keyvase nil) (not has-hammer)) (do
+          (println "You can't get to the key, you'll need a hammer to break the vase")
+          state
+        )
+        (and (not= hammerhere nil) has-hammer) (do
+          (println "You already have a hammer.")
+          state
+        )
+        (and (not= hammerhere nil) (not has-hammer)) (do
+          (println "You pick up a hammer.")
+          (assoc-in state [:hammerstatus hammerhere] (cur-player state))
+        )
+        :else (do
+          (println "There's nothing to take in this room!")
+          state
+        )
+      )
     )
   )
 )
 
 (defn special-room [state]
-  (if (= (state :turn) 1)
-      (if   
-      (= (state :player1) 21)(do
-        (println "Player 1 finds a door")
-        (if (and (= (state :bluekey) :play1) (= (state :greenkey) :play1) (= (state :redkey) :play1))
-          (do (println "Player 1 unlocks the door and escapes!") (assoc state :status1 :escape))
-          (do (println "The door is locked") (assoc state :status1 :trapped :turn 2))))
-      (assoc state :turn 2))
-    
-      (if 
-      (= (state :player2) 21)(do
-        (println "Player 2 finds a door")
-        (if (and (= (state :bluekey) :play2) (= (state :greenkey) :play2) (= (state :redkey) :play2))
-          (do (println "Player 2 unlocks the door and escapes!") (assoc state :status2 :escape))
-          (do (println "The door is locked") (assoc state :status2 :trapped :turn 1))))
-      (assoc state :turn 1))
+  (let [curplayer (cur-player state)]
+    (if (= ((state :playerlocs) curplayer) 21)
+      (do
+        (println "Player" (+ curplayer 1) "finds a door!")
+        (if (and (apply = (state :keystatus)) (= (first (state :keystatus)) curplayer))
+          (do
+            (println "Player" (+ curplayer 1) "unlocks the door and escapes!")
+            (assoc-in state [:playerescaped curplayer] true)
+          )
+          (do
+            (println "The door is locked with three keyholes...")
+            state
+          )
+        )
+      )
+      state ; nothing fancy if not in special room
     )
+  )
 )
 
+; TODO: figure out turn changing (happens when moving)
+; which actions return an updated state?
 (defn repl [state]
-  (println "You find yourself trapped in a series of rooms")
-  (println "Find all three keys to unlock the door and escape")
-  (println "Beware! There is another player trapped in this maze")
-  (println "Be the first player to escape to win")
-  (loop [state state]
-      (if (and (= (state :status1) :trapped) (= (state :status2) :trapped))
+  (do
+    (println "You find yourself trapped in a series of rooms")
+    (println "Find all three keys to unlock the door and escape")
+    (println "Beware! There is another player trapped in this maze")
+    (println "Be the first player to escape to win")
+    (loop [state state]
+      (if (every? false? (state :playerescaped)) ; if nobody escaped
+        (let [curplayer (cur-player state) curplayerstr (+ curplayer 1)]
           (do
-            (println "")
-            (if (= (state :turn) 1) (println "It is player 1's turn") (println "It is player 2's turn"))
-            (println "Player 1 is in room" (state :player1) "| Player 2 is in room" (state :player2))
+            (println)
+            (println (str "It is player " curplayerstr "'s turn"))
+            (doall (map (fn [playerno]
+              (println (str "Player " (+ playerno 1) " is in room " ((state :playerlocs) playerno)))
+            ) (range (count (state :playerescaped)))))
             (println "What would you like to do? Note: Moving will end your turn")
             (println "Move (m), Examine Room (e), Open Inventory (i), Take Object (t), Drop Object (d), Quit (q)")
             (let [action (read-line)] 
-              (cond 
-                (= action "m")(do 
+              (case action
+                "m" (do 
                   (println "Pick a room to enter (You may stay in your current room)")
                   (println "You can move North (n), South (s), East (e), West (w), Don't move (d)")
-                  (let [room (read-line)]
-                      (if (= (state :turn) 1)
-                        (if (not= (valid-room (state :player1) room) -1)
-                          (recur (special-room (collide (assoc state :player1 (valid-room (state :player1) room)))))
-                          (cond 
-                            (= room "-1") (println "Quitting program") 
-                            (= room "0") (do (if (or (= (state :bluekey) :vased) (= (state :bluekey) :hidden))(print "Blue key location" (state :blueloc) " ")(print ""))
-                                          (if (or (= (state :greenkey) :vased) (= (state :greenkey) :hidden))(print "Green key location" (state :greenloc) " ")(print ""))
-                                          (if (or (= (state :redkey) :vased) (= (state :redkey) :hidden))(print "Red key location" (state :redloc) " ")(print ""))
-                                          (if (= (state :hammer1) :hidden)(print "Hammer 1 location" (state :hammer1loc) " ")(print ""))
-                                          (if (= (state :hammer2) :hidden)(print "Hammer 2 location" (state :hammer2loc) " ")(print ""))
-                                          (recur state))
-                            :else (do (println "Invalid Room")(recur state))
-                          ))
-                        (if (not= (valid-room (state :player2) room) -1)
-                          (recur (special-room (collide (assoc state :player2 (valid-room (state :player2) room)))))
-                          (cond 
-                            (= room "-1") (println "Quitting program") 
-                            (= room "0") (do (if (= (state :bluekey) :vased)(print "Blue key location" (state :blueloc) " ")(print ""))
-                                          (if (= (state :greenkey) :vased)(print "Green key location" (state :greenloc) " ")(print ""))
-                                          (if (= (state :redkey) :vased)(print "Red key location" (state :redloc) " ")(print ""))
-                                          (if (= (state :hammer1) :hidden)(print "Hammer 1 location" (state :hammer1loc) " ")(print ""))
-                                          (if (= (state :hammer2) :hidden)(print "Hammer 2 location" (state :hammer2loc) " ")(print ""))
-                                          (recur state))
-                            :else (do (println "Invalid Room")(recur state))
-                          )))))
-              (= action "e") (do (examine-room state) (recur state))
-              (= action "i") (do (open-inv state) (recur state))
-              (= action "t") (recur (take-obj state))
-              (= action "d") (recur (drop-obj state))
-              (= action "q") (println "Quitting program")
-              :else (do (println "Invalid Input") (recur state))
+                  (let [room (read-line) curloc ((state :playerlocs) curplayer)]
+                    (let [newroom (valid-room curloc room)]
+                      (if (= newroom -1)
+                        (do
+                          (println "Invalid move direction")
+                          (recur state)
+                        )
+                        (recur (change-turn (special-room (collide (assoc-in state [:playerlocs curplayer] newroom)))))
+                      )
+                    )
+                  )
                 )
+                "e" (do (examine-room state) (recur state))
+                "i" (do (open-inv state) (recur state))
+                "t" (recur (take-obj state))
+                "d" (recur (drop-obj state))
+                "q" (println "Quitting program")
+                "0" (do
+                  (doall (map (fn [keyno] (println "Key" keyno "at " ((state :keylocs) keyno))) (range (count (state :keystatus)))))
+                  (doall (map (fn [hammerno] (println "Hammer" hammerno "at " ((state :hammerlocs) hammerno))) (range (count (state :hammerstatus)))))
+                  (recur state)
+                )
+                (do (println "Invalid Input") (recur state))
               )
             )
-          (println "Game Over"))))
+          )
+    )
+    (println "Game Over")))
+  )
+)
 
 
 (defn -main []
