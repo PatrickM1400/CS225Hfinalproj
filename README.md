@@ -6,5 +6,5 @@ Project memebers:
     Venkat Rao (vvrao2)
 
 Run the clojure program by using "lein run" in the adventure directory. 
-Note: To assist with project demonstrations, entering "0" when the user is prompted for the direction of travel will display the location of all hidden items.
+Note: To assist with project demonstrations, entering "0" when the user is prompted for an action will display the location of all hidden items.
 
