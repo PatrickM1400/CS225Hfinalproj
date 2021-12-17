@@ -11,19 +11,19 @@
 
 (def maze-size (count maze))
 
-(defn rand-unique
-  "Pick a random number from 0 to `max-1` that is not in the set `exclude`.  Does not check for errors."
-  [max exclude]
-  (let [pick (rand-int max)]
-      (if (exclude pick) (rand-unique max exclude) pick)))
+(defn room-unique
+  "Pick a random room from 1 to 25 that is not in the set `exclude`.  Does not check for errors."
+  [exclude]
+  (let [pick (+ (rand-int 25) 1)]
+      (if (exclude pick) (room-unique exclude) pick)))
 
 (defn new-game []
   (let [
-    blueloc (rand-unique 26 #{0 1 21 25})
-    greenloc (rand-unique 26 #{0 1 21 25 blueloc})
-    redloc (rand-unique 26 #{0 1 21 25 blueloc greenloc})
-    hammer1loc (rand-unique 26 #{0 1 21 25 blueloc greenloc redloc})
-    hammer2loc (rand-unique 26 #{0 1 21 25 blueloc greenloc redloc hammer1loc})
+    blueloc (room-unique #{1 21 25})
+    greenloc (room-unique #{1 21 25 blueloc})
+    redloc (room-unique #{1 21 25 blueloc greenloc})
+    hammer1loc (room-unique #{1 21 25 blueloc greenloc redloc})
+    hammer2loc (room-unique #{1 21 25 blueloc greenloc redloc hammer1loc})
     ]
     {
     :player1 1
@@ -41,9 +41,6 @@
     :status1 :trapped
     :status2 :trapped
     :turn 1}))
-  
-(defn vector-has [v elt]
-      (some #{elt} v))
 
 (defn move-player1 [state]
   (let [pick (rand-nth (-> :player1 state maze))] (if (== pick (state :player1)) (move-player1 state) pick))
@@ -68,15 +65,15 @@
     (do (println "Oh, fancy seeing you here")
     (if (= (state :turn) 1)
       (cond 
-        (= (state :bluekey) :play2) (assoc state :player2 (move-player2 state) :turn 1 :bluekey :hidden :blueloc (rand-unique 26 #{0 21 (state :redloc) (state :greenloc)}))
-        (= (state :greenkey) :play2) (assoc state :player2 (move-player2 state) :turn 1 :greenkey :hidden :greenloc (rand-unique 26 #{0 21 (state :redloc) (state :blueloc)}))
-        (= (state :redkey) :play2) (assoc state :player2 (move-player2 state) :turn 1 :redkey :hidden :redloc (rand-unique 26 #{0 21 (state :blueloc) (state :greenloc)}))
+        (= (state :bluekey) :play2) (assoc state :player2 (move-player2 state) :turn 1 :bluekey :hidden :blueloc (room-unique #{21 (state :redloc) (state :greenloc)}))
+        (= (state :greenkey) :play2) (assoc state :player2 (move-player2 state) :turn 1 :greenkey :hidden :greenloc (room-unique #{21 (state :redloc) (state :blueloc)}))
+        (= (state :redkey) :play2) (assoc state :player2 (move-player2 state) :turn 1 :redkey :hidden :redloc (room-unique #{21 (state :blueloc) (state :greenloc)}))
         :else (assoc state :player2 (move-player2 state) :turn 1)
       )
       (cond 
-        (= (state :bluekey) :play1) (assoc state :player1 (move-player1 state) :turn 2 :bluekey :hidden :blueloc (rand-unique 26 #{0 21 (state :redloc) (state :greenloc)}))
-        (= (state :greenkey) :play1) (assoc state :player1 (move-player1 state) :turn 2 :greenkey :hidden :greenloc (rand-unique 26 #{0 21 (state :redloc) (state :blueloc)}))
-        (= (state :redkey) :play1) (assoc state :player1 (move-player1 state) :turn 2 :redkey :hidden :redloc (rand-unique 26 #{0 21 (state :blueloc) (state :greenloc)}))
+        (= (state :bluekey) :play1) (assoc state :player1 (move-player1 state) :turn 2 :bluekey :hidden :blueloc (room-unique #{21 (state :redloc) (state :greenloc)}))
+        (= (state :greenkey) :play1) (assoc state :player1 (move-player1 state) :turn 2 :greenkey :hidden :greenloc (room-unique #{21 (state :redloc) (state :blueloc)}))
+        (= (state :redkey) :play1) (assoc state :player1 (move-player1 state) :turn 2 :redkey :hidden :redloc (room-unique #{21 (state :blueloc) (state :greenloc)}))
         :else (assoc state :player1 (move-player1 state) :turn 2)
       ))
     )
